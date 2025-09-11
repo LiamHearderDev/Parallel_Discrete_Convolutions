@@ -139,28 +139,36 @@ int extract_data(char* filepath, int width, int height, int padding_width, int p
 */
 int conv2d(float* f, int H, int W, float* g, int kH, int kW, int w_padding, int h_padding, float* output){
 
-    const int total_height = H + h_padding*2;
-    const int total_width = W + w_padding*2;
+    const int total_height = H + (h_padding*2);
+    const int total_width = W + (w_padding*2);
 
     // dimensions for convolution window
-    const int M = (kH / 2);
-    const int N = (kW / 2);
+    const int M = kH / 2;
+    const int N = kW / 2;
 
     // Offsets allow for asymmetric centering to account for evenly sized kernels
-    const int M_offset = kH % 2 == 0 ? 1 : 0;
-    const int N_offset = kW % 2 == 0 ? 1 : 0;
+    const int M_offset = (kH % 2) == 0 ? 1 : 0;
+    const int N_offset = (kW % 2) == 0 ? 1 : 0;
 
-    // Iterate over every value in the feature map
-    for (int n = h_padding; n < total_height - h_padding; n++){       // feature : Iterate over Rows
-        for (int k = w_padding; k < total_width - w_padding; k++){    // feature : Iterate over columns
+    // Precompute a bunch of variables now to save time later
+    const int end_row = total_height - h_padding;
+    const int end_col = total_width - w_padding;
+    const int kernel_start_j = -N;
+    const int kernel_end_j = N - N_offset;
+    const int kernel_start_i = -M;
+    const int kernel_end_i = M - M_offset;
+    
+    for (int n = h_padding; n < end_row; n++){
+        for (int k = w_padding; k < end_col; k++){
             float result = 0.0f;
-            for (int i = -M; i <= M - M_offset; i++){               // kernel : Iterate over Rows
-                for (int j = -N; j <= N - N_offset; j++){           // kernel : Iterate over columns
-                    //result += f[col][row] * g[i + M][j + N];
+
+            for (int i = kernel_start_i; i <= kernel_end_i; i++){
+
+                for (int j = kernel_start_j; j <= kernel_end_j; j++){
                     result += f[IDX(n + i, k + j, total_width)] * g[IDX(i + M, j + N, kW)];
                 }
             }
-            //output[n - h_padding][k - w_padding] = result;
+
             output[IDX(n - h_padding, k - w_padding, W)] = result;
         }
     }
@@ -180,33 +188,39 @@ int conv2d(float* f, int H, int W, float* g, int kH, int kW, int w_padding, int 
 * @param h_padding      Height of the padding in the Feature Map.
 * @param padded_output  Pointer to the location where outputs are stored.
 */
-int parallel_conv2d(float* f, int H, int W, float* g, int kH, int kW, int w_padding, int h_padding, float_array padded_output){
+int parallel_conv2d(float*  f, int H, int W, float*  g, int kH, int kW, int w_padding, int h_padding, float_array padded_output){
 
-    const int total_height = H + h_padding*2;
-    const int total_width = W + w_padding*2;
+    const int total_height = H + (h_padding*2);
+    const int total_width = W + (w_padding*2);
 
     // dimensions for convolution window
-    const int M = (kH / 2);
-    const int N = (kW / 2);
+    const int M = kH / 2;
+    const int N = kW / 2;
 
     // Offsets allow for asymmetric centering to account for evenly sized kernels
-    const int M_offset = kH % 2 == 0 ? 1 : 0;
-    const int N_offset = kW % 2 == 0 ? 1 : 0;
+    const int M_offset = (kH % 2) == 0 ? 1 : 0;
+    const int N_offset = (kW % 2) == 0 ? 1 : 0;
 
-    const int threads = omp_get_max_threads();
-
-    // TODO: make this `default(none)` and add anything we need as `shared`
+    // Precompute a bunch of variables now to save time later
+    const int end_row = total_height - h_padding;
+    const int end_col = total_width - w_padding;
+    const int kernel_start_j = -N;
+    const int kernel_end_j = N - N_offset;
+    const int kernel_start_i = -M;
+    const int kernel_end_i = M - M_offset;
+    
     #pragma omp parallel for collapse(2) schedule(dynamic, W)
-    for (int n = h_padding; n < total_height - h_padding; n++){         // H iterations
-        for (int k = w_padding; k < total_width - w_padding; k++){      // W iterations
+    for (int n = h_padding; n < end_row; n++){
+        for (int k = w_padding; k < end_col; k++){
             float result = 0.0f;
 
             #pragma omp simd collapse(2) reduction(+:result)
-            for (int j = -N; j <= N - N_offset; j++){
-                for (int i = -M; i <= M - M_offset; i++){
+            for (int i = kernel_start_i; i <= kernel_end_i; i++){
+                for (int j = kernel_start_j; j <= kernel_end_j; j++){
                     result += f[IDX(n + i, k + j, total_width)] * g[IDX(i + M, j + N, kW)];
                 }
             }
+
             padded_output.arr[IDX(n - h_padding, k - w_padding, W)] = result;
         }
     }
@@ -278,14 +292,14 @@ int generate_data(int height, int width, float* *output){
 
 
 int main(int argc, char** argv) {
-    
-    omp_set_num_threads(4); // TODO: Maybe make this a flag?
     omp_set_nested(1); // Allow nested parallelism
 
     // Seed for random generation later
     srand(time(0));
 
     double file_start_time = omp_get_wtime();
+
+    
 
     // Initialising variables for future use
     // TODO: we should align all of these, to avoid False Sharing
@@ -299,9 +313,10 @@ int main(int argc, char** argv) {
 
     // DEBUG FLAGS
     int benchmark_mode = 0;         // -b
-    int multi_benchmark_mode = 9;   // -mb <max_iterations>
-    int max_iterations = 1;             // Used by multi_benchmark_mode to run the code multiple times, getting an average.
-    int parallel_mode = 0;          // -p
+    int multi_benchmark_mode = 0;   // -mb <max_iterations>
+    int max_iterations = 1;         
+    int threads = 0;                // -t <threads>
+    
 
     // Extract arguments into their variables
     for (int i = 1; i < argc; i++) {
@@ -310,30 +325,37 @@ int main(int argc, char** argv) {
 
         // Check all flags
         if (strcmp(argv[i], "-H") == 0) {
-            H = atoi(argv[++i]);
+            if (i + 1 >= argc) { printf("Incorrect usage of -H flag. Please provide an input height.\n"); return 1; }
+            H = atoi(argv[++i]) > 0 ? atoi(argv[i]) : 1;
             continue;
         }
         if (strcmp(argv[i], "-W") == 0) {
-            W = atoi(argv[++i]);
+            if (i + 1 >= argc) { printf("Incorrect usage of -W flag. Please provide an input width.\n"); return 1; }
+            W = atoi(argv[++i]) > 0 ? atoi(argv[i]) : 1;
             continue;
         }
         if (strcmp(argv[i], "-kH") == 0) {
-            kH = atoi(argv[++i]);
+            if (i + 1 >= argc) { printf("Incorrect usage of -kH flag. Please provide a kernel height.\n"); return 1; }
+            kH = atoi(argv[++i]) > 0 ? atoi(argv[i]) : 1;
             continue;
         }
         if (strcmp(argv[i], "-kW") == 0) {
-            kW = atoi(argv[++i]);
+            if (i + 1 >= argc) { printf("Incorrect usage of -kW flag. Please provide a kernel width.\n"); return 1; }
+            kW = atoi(argv[++i]) > 0 ? atoi(argv[i]) : 1;
             continue;
         }
         if (strcmp(argv[i], "-f") == 0) {
+            if (i + 1 >= argc) { printf("Incorrect usage of -f flag. Please provide a filepath.\n"); return 1; }
             feature_file = argv[++i];
             continue;
         }
         if (strcmp(argv[i], "-g") == 0) {
+            if (i + 1 >= argc) { printf("Incorrect usage of -g flag. Please provide a filepath.\n"); return 1; }
             kernel_file = argv[++i];
             continue;
         }
         if (strcmp(argv[i], "-o") == 0) {
+            if (i + 1 >= argc) { printf("Incorrect usage of -o flag. Please provide a filepath.\n"); return 1; }
             output_file = argv[++i];
             continue;
         }
@@ -343,15 +365,25 @@ int main(int argc, char** argv) {
         }
         if (strcmp(argv[i], "-mb") == 0) {
             multi_benchmark_mode = 1;
-            max_iterations = atoi(argv[++i]);
+            if (i + 1 >= argc) { max_iterations = 15; continue; }
+            max_iterations = atoi(argv[++i]) > 0 ? atoi(argv[i]) : 15;
             continue;
         }
-        if (strcmp(argv[i], "-p") == 0) {
-            parallel_mode = 1;
+        if (strcmp(argv[i], "-t") == 0) {
+            if (i + 1 >= argc) { printf("Incorrect usage of -t flag. Please provide a number of threads.\n"); return 1; }
+            threads = atoi(argv[++i]) > 0 ? atoi(argv[i]) : 1;
+            omp_set_num_threads(threads);
             continue;
         }
     }
 
+    if (benchmark_mode) { 
+        if (threads > 1){
+            printf("Beginning Parallel Convolutions with %d threads...\n", threads);
+        } else {
+            printf("Beginning Serial Convolutions...\n");
+        }
+    };
     
     
     /* 
@@ -366,12 +398,12 @@ int main(int argc, char** argv) {
 
     
     TODO:
-        - Test to see if weirdly shaped kernels also work, e.g., 5x3, 2x1, 1x1, 1x9, 50x1, 25x10, etc
         - Compile with `-Wall -Werror` flags, to catch all potential issues. Fix them all, no exceptions.
     */
 
     // TODO: remove this before submission, this is just for testing
     double average_time = 0.0f;
+    if ((feature_file || kernel_file) && multi_benchmark_mode) { printf("Do not use -mb flag when providing input files.\n"); return 1; }
     for (int iteration = 0; iteration < max_iterations; iteration++){
 
     // ~~~~~~~~~~~~~~ KERNEL ~~~~~~~~~~~~~~ // 
@@ -494,67 +526,68 @@ int main(int argc, char** argv) {
     // ~~~~~~~~~~~~~~ conv2d() ~~~~~~~~~~~~~~ //
     
 
-    if (output_file != NULL){
+    
 
-        if (kernel == NULL || feature_map == NULL){
-            printf("To generate an output, please provide all inputs.\n");
+    // Defining output pointers
+    float* outputs = NULL;              // Used for serial convolution
+    float_array padded_outputs = {0};   // Used for parallel convolution    
+    
+
+    // Parallel Convolutions
+    if (threads > 1){
+        
+        // The size of the array padding. Used to prevent false sharing.
+        // Equal to the number of bytes left over in the cache line containing the final element in float array.
+        const int cache_padding_size = 64 - ((W * sizeof(float)) % 64);
+
+        if (posix_memalign((void**)&padded_outputs.arr, 64, W * H * sizeof(float)) != 0){
+            // TODO: Handle error
+            printf("Error allocating memory for padded output.\n");
             return 1;
         }
-
-        // Defining output pointers
-        float* outputs = NULL;              // Used for serial convolution
-        float_array padded_outputs = {0};   // Used for parallel convolution    
-        
-
-        // Parallel Convolutions
-        if (parallel_mode == 1){
-            
-            // The size of the array padding. Used to prevent false sharing.
-            // Equal to the number of bytes left over in the cache line containing the final element in float array.
-            const int cache_padding_size = 64 - ((W * sizeof(float)) % 64);
-
-            if (posix_memalign((void**)&padded_outputs.arr, 64, W * H * sizeof(float)) != 0){
-                // TODO: Handle error
-                printf("Error allocating memory for padded output.\n");
-                return 1;
-            }
-            padded_outputs.padding = cache_padding_size == 64 ? NULL : (char*)malloc(cache_padding_size);
+        padded_outputs.padding = cache_padding_size == 64 ? NULL : (char*)malloc(cache_padding_size);
 
 
-            // Timing begins here, because implementation only starts here.
-            double start_time = omp_get_wtime();
+        // Timing begins here, because implementation only starts here.
+        double start_time = omp_get_wtime();
 
-            if (parallel_conv2d(feature_map, H, W, kernel, kH, kW, padding_width, padding_height, padded_outputs) != 0) {
-                // TODO: Handle when can't perform convolutions
-            }
-
-            if (benchmark_mode == 1) { printf("Parallel Time:   %f\n", (omp_get_wtime() - start_time));}
-            if (multi_benchmark_mode == 1) { average_time += (omp_get_wtime() - start_time); }
-            
-        // Serial Convolutions
-        } else {
-
-            if (posix_memalign((void**)&outputs, 64, W * H * sizeof(float)) != 0){
-                // TODO: Handle error
-                printf("Error allocating memory for outputs.\n");
-            }
-
-            double start_time = omp_get_wtime();
-
-            if (conv2d(feature_map, H, W, kernel, kH, kW, padding_width, padding_height, outputs) != 0){
-                // TODO: Handle when can't perform convolutions
-            }
-
-            // Benchmarking
-            if (benchmark_mode == 1) {printf("Serial Time:  %f\n", (omp_get_wtime() - start_time)); }
-            if (multi_benchmark_mode == 1) { average_time += (omp_get_wtime() - start_time); }
+        if (parallel_conv2d(feature_map, H, W, kernel, kH, kW, padding_width, padding_height, padded_outputs) != 0) {
+            // TODO: Handle when can't perform convolutions
         }
+
+        if (benchmark_mode == 1) { printf("%f\n", (omp_get_wtime() - start_time));}
+        if (multi_benchmark_mode == 1) { average_time += (omp_get_wtime() - start_time); }
+        
+    // Serial Convolutions
+    } else {
+
+        if (posix_memalign((void**)&outputs, 64, W * H * sizeof(float)) != 0){
+            // TODO: Handle error
+            printf("Error allocating memory for outputs.\n");
+        }
+
+        double start_time = omp_get_wtime();
+
+        if (conv2d(feature_map, H, W, kernel, kH, kW, padding_width, padding_height, outputs) != 0){
+            // TODO: Handle when can't perform convolutions
+        }
+
+        // Benchmarking
+        if (benchmark_mode == 1) {printf("%f\n", (omp_get_wtime() - start_time)); }
+        if (multi_benchmark_mode == 1) { average_time += (omp_get_wtime() - start_time); }
+    }
         
         
 
 
     // ~~~~~~~~~~~~~~ Write to Output ~~~~~~~~~~~~~~ //
 
+    if (output_file != NULL){
+
+        if (kernel == NULL || feature_map == NULL){
+            printf("To generate an output, please provide all inputs.\n");
+            return 1;
+        }
 
         if (write_data_to_file(output_file, outputs, padded_outputs, H, W, 0, 0) != 0){
             // TODO: Handle when can't write to output.
