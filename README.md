@@ -1,6 +1,6 @@
 # HPC - Parallel Discrete Convolutions
 
-A C Library, using OpenMP, for fast parallel discrete convolutions. Created by Liam Hearder (23074422) and Pranav Menon (24069351).
+A C Library, using OpenMP, for fast parallel discrete convolutions. Created by Liam Hearder and Pranav Menon.
 
 The formula for discrete convolutions can be found here:
 
@@ -30,12 +30,12 @@ ___
 ### Sample usage:
 
 + With files for the kernel and feature map
-    * ./conv2d -f f0.txt -g g0.txt …
+    * `./conv2d -f f0.txt -g g0.txt …`
 + Generating the kernel and feature map
-    * ./conv2d -H 1000 -W 1000 -kH 3 -kW 3 …
+    * `./conv2d -H 1000 -W 1000 -kH 3 -kW 3 …`
 + Generating and saving the kernel and feature map
-    * ./conv2d -H 1000 -W 1000 -kH 3 -kW -f feature.txt -g kernel.txt …
+    * `./conv2d -H 1000 -W 1000 -kH 3 -kW -f feature.txt -g kernel.txt …`
 + With an output file
-    * ./conv2d … -o output.txt
+    * `./conv2d … -o output.txt`
 + Calculate in parallel with two threads
-    * ./conv2d … -t 2
+    * `./conv2d … -t 2`
