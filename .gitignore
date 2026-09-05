@@ -45,3 +45,4 @@ conv2d
 *.txt
 *.py
 *.slurm
+test*

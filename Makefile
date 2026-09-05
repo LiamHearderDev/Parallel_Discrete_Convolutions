@@ -1,7 +1,7 @@
 # Name: Liam Hearder       Student Number: 23074422
 # Name: Pranav Menon       Student Number: 24069351
 
-CC = gcc
+CC = mpicc
 CFLAGS = -fopenmp -Wall -Werror
 
 SOURCE = conv2d.c
